@@ -1,2 +1,3 @@
-# loan-fintech-hfl
-Privacy Preserving Neural Network Predictive Modelling in Loan Fintech using Horizontal Federated Learning
+# Towards FedML For Fraud Detection
+
+Privacy-Preserving Fraud Detection in Banking Using Horizontal Federated Learning
