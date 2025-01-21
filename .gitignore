@@ -9,5 +9,6 @@ wheels/
 # Virtual environments
 .venv
 
-# Client Datasets
+# Datasets
 data/clients_data
+data/Base.csv
