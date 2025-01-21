@@ -92,7 +92,6 @@ loan-fintech-hfl/
 │   ├── data_prep.py     # Script to prepare data for FL
 │   ├── local_utility.py # Utility functions
 │   ├── paths.py         # Script to set up folder structure
-│   ├── main.py          # Main script for running HFL
 │
 ├── .gitignore           # Ignore rules for Git
 ├── README.md            # Project documentation
