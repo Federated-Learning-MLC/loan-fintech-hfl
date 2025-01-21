@@ -36,7 +36,7 @@ Ensure you have the following installed:
 
 2. Clone the GitHub repository into your project directory:
    ```bash
-   git clone https://github.com/Federated-Learning-MLC/loan-fintech-hfl.git .
+   git clone https://github.com/Federated-Learning-MLC/loan-fintech-hfl.git
    ```
 
 ---
