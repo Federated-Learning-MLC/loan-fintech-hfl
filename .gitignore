@@ -12,3 +12,6 @@ wheels/
 # Datasets
 data/clients_data
 data/Base.csv
+
+#ipynb checkpoints
+notebooks/*.ipynb_checkpoints

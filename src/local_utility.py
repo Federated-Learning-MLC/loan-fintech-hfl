@@ -6,13 +6,16 @@ import matplotlib.ticker as mtick
 
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 
 import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 
 from typing import Optional, Union, List
 
-from src.config import BASE_DATA_PATH, NUM_FEATURES, SEED
+from src.config import BASE_DATA, BASE_DATA_DOWNSAMPLED, NUM_FEATURES, SEED, TARGET_COLS, NUM_COLS, CAT_COLS
 from src.paths import DATA_DIR, CLIENTS_DATA_DIR
 
 
@@ -95,7 +98,7 @@ def row_check(clients: int = 5):
         return pd.read_csv(f"{CLIENTS_DATA_DIR}/{prefix}_{index}.csv")
 
     # Initialize expected values
-    expected_row_count = 1_000_000
+    expected_row_count = 30_808
     expected_label_sum = 11_029
 
     # Load and aggregate datasets
@@ -208,10 +211,11 @@ class EDAPlotter:
         self, df: pd.DataFrame, cols_missing_neg1: list[str]
     ):
         # Replace -1 with NaN in the specified columns
-        df[cols_missing_neg1] = df[cols_missing_neg1].replace(-1, np.nan)
+        temp_df = df.copy()
+        temp_df[cols_missing_neg1] = temp_df[cols_missing_neg1].replace(-1, np.nan)
 
         # Calculate the percentage of missing values by feature
-        null_X = df.isna().sum() / len(df) * 100
+        null_X = temp_df.isna().sum() / len(df) * 100
 
         # Plot the missing values
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -241,7 +245,7 @@ class EDAPlotter:
 
 # ----------------------- Data Preprocessing Utils: --------------------------------
 
-def preprocess_dataframe(df):
+def preprocess_data(df):
     """
     Applies preprocessing steps to the dataframe, including shuffling, data type transformations,
     and value capping based on specified criteria.
@@ -269,13 +273,23 @@ def preprocess_dataframe(df):
     # Replacing the negative values in velocity_6h with 0
     df['velocity_6h'] = np.where(df['velocity_6h'] < 0, 0, df['velocity_6h'])
 
-    # Drop all rows with missing data (EXPERIMENT ON THIS. DOES FILLING WORKS BETTER?)
+    # Drop all rows with missing data
     df = df.dropna(axis=0)
+    
+    X = df[CAT_COLS + NUM_COLS]
+    y = df[TARGET_COLS]
 
-    return df
+    pipeline = encode_and_scale_data(df)
+    X_scaled = pipeline.fit_transform(X)
+    encoded_cols = pipeline.named_steps['preprocess'].get_feature_names_out().tolist()
+    
+    df_encoded = pd.DataFrame(X_scaled, columns=encoded_cols)
+    df_encoded[TARGET_COLS] = y 
+    
+    return df_encoded, pipeline
 
 
-def encode_and_scale_dataframe(df):
+def encode_and_scale_data(df):
     """
     Encodes categorical variables and scales numerical features within the DataFrame.
 
@@ -295,28 +309,29 @@ def encode_and_scale_dataframe(df):
     ```
     """
 
-    cat_cols = ['payment_type', 'employment_status',
-                'housing_status', 'source', 'device_os']
-
-    num_cols = ['income', 'name_email_similarity',
-                'prev_address_months_count', 'current_address_months_count',
-                'customer_age', 'days_since_request', 'intended_balcon_amount',
-                'zip_count_4w', 'velocity_6h', 'velocity_24h', 'velocity_4w',
-                'bank_branch_count_8w', 'date_of_birth_distinct_emails_4w',
-                'credit_risk_score', 'email_is_free', 'phone_home_valid',
-                'phone_mobile_valid', 'bank_months_count', 'has_other_cards',
-                'proposed_credit_limit', 'foreign_request', 'session_length_in_minutes',
-                'keep_alive_session', 'device_distinct_emails_8w','month']
-
     # Encode categorical variables
+    
+    num_preprocessing = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy="mean")),
+        ("scaler", MinMaxScaler())
+    ])
+    
+    cat_preprocessing = Pipeline(steps=[
+        ("imputer", SimpleImputer(strategy='most_frequent')),
+        ('encoder', OneHotEncoder(handle_unknown="ignore")),
+    ])
+    
+    data_preprocessing = ColumnTransformer(
+        transformers=[
+        ('numerical', num_preprocessing, NUM_COLS),
+        ("categorical", cat_preprocessing, CAT_COLS)
+    ],
+    remainder="passthrough"
+    )
+    
+    pipeline = Pipeline(steps=[("preprocess", data_preprocessing)])
 
-    df_encoded = pd.get_dummies(df, columns=cat_cols)
-
-    # Scale features
-    scaler = MinMaxScaler()
-    df_encoded[num_cols] = scaler.fit_transform(df_encoded[num_cols])
-
-    return df_encoded, scaler
+    return pipeline
 
 
 def split_data(df_encoded):
@@ -336,8 +351,8 @@ def split_data(df_encoded):
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(df_encoded)
     ```
     """
-    X = df_encoded.iloc[:, 1:].to_numpy()
-    y = df_encoded.iloc[:, 0].to_numpy()
+    X = df_encoded.iloc[:, :-1].to_numpy()
+    y = df_encoded.iloc[:, -1].to_numpy()
 
     X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, y, test_size=0.1, stratify=y, random_state=SEED)
@@ -364,15 +379,15 @@ def upload_dataset():
     """
     set_seed()
 
-    df = pd.read_csv(BASE_DATA_PATH)
-    df_preprocessed = preprocess_dataframe(df)
-    df_encoded, scaler = encode_and_scale_dataframe(df_preprocessed)
+    df = pd.read_csv(BASE_DATA_DOWNSAMPLED) #Using the downsampled base data
+    df_encoded, pipeline = preprocess_data(df)
+    
     #print(f"The shape of the main dataframe {df_encoded.shape}") 
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(df_encoded)
 
-    feature_names = df_encoded.columns.tolist()[1:]
+    feature_names = df_encoded.columns.tolist()[:-1]
 
-    return (X_train, X_val, X_test, y_train, y_val, y_test, feature_names, scaler)
+    return (X_train, X_val, X_test, y_train, y_val, y_test, feature_names, pipeline)
 
 
 def load_individual_data(client_id, include_val_in_train=False):
@@ -399,7 +414,7 @@ def load_individual_data(client_id, include_val_in_train=False):
         >>> train_dataset, val_dataset, test_dataset, column_names, test_features, exposure = load_individual_data(-1, True)
         >>> print(f"Training dataset size: {len(train_dataset)}")
     """
-    MY_DATA_PATH = DATA_DIR
+    
     suffix = '' if client_id == -1 else f'_{client_id}'
 
     # Load datasets
