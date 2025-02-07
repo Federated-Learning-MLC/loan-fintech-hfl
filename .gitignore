@@ -13,5 +13,6 @@ wheels/
 data/clients_data
 data/Base.csv
 
-#ipynb checkpoints
+#ipynb checkpoints and notebook
 notebooks/*.ipynb_checkpoints
+notebooks/Test.ipynb

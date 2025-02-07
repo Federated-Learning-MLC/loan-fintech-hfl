@@ -49,7 +49,7 @@ def simulate_dataset():
     """
     Main execution function that orchestrates the dataset preparation and validation for federated learning.
     """
-    print(f"Simulating Federated Learning Dataset for {config.server_config.get('num_clients')} Clients ...")
+    print(f"Simulating Federated Learning Dataset for {config.SERVER_CONFIG.get('num_clients')} Clients ...")
     # Parse command line arguments to determine the configuration for federated learning
     args = parse_arguments()
 

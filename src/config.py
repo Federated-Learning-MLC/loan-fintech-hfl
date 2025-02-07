@@ -16,19 +16,16 @@ NUM_COLS = ['income', 'name_email_similarity','prev_address_months_count',
 
 # Constants and Configuration
 IF_TRAIN_VAL = 0  # Include validation dataset in training
-QUANTISATION = 0
-SMPC_NOISE = 1 
-EPOCHS = 10
-BATCH_SIZE = 500
-NUM_FEATURES = 53
-LEARNING_RATE = 0.001
-NUM_UNITS_1 = 15 #unclear # Extracting top results for NUM_UNITS_1 and NUM_UNITS_2
-NUM_UNITS_2 = 5 #unclear
+EPOCHS = 12 #10
+BATCH_SIZE = 64
+NUM_FEATURES = 51
+LEARNING_RATE = 0.01
+NUM_CLASSES = 2
 
 # Server Configuration
-server_config = {
+SERVER_CONFIG = {
     "num_clients": 5,
-    "num_rounds": 350 #why 350
+    "num_rounds": 50 #10
 }
 
 # Dataset Configuration
@@ -37,10 +34,9 @@ dataset_config = {
     "data": paths.DATA_DIR / "Base.csv",
     "sampled_data": paths.DATA_DIR / "base_downsampled.csv",
     "seed": 42,
-    "num_clients": server_config["num_clients"],
+    "num_clients": SERVER_CONFIG["num_clients"],
     "num_features": NUM_FEATURES
 }
-
 
 
 BASE_DATA = dataset_config["data"]
@@ -49,9 +45,8 @@ SEED = dataset_config["seed"]
 
 
 # Constructing a unique run name based on our configuration
-run_name = f"Running_{server_config['num_clients']}clients_{server_config['num_rounds']}rounds_{EPOCHS}epochs_{QUANTISATION}"
+run_name = f"Running_{SERVER_CONFIG['num_clients']}clients_{SERVER_CONFIG['num_rounds']}rounds_{EPOCHS}epochs"
 
 
 if __name__ == "__main__":
     print(f"Run name: {run_name}")
-    print(f"Top tuning results for NUM_UNITS_1: {NUM_UNITS_1}, NUM_UNITS_2: {NUM_UNITS_2}")

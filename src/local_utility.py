@@ -3,17 +3,21 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import seaborn as sns
 
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.metrics import confusion_matrix
 
 import torch
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
 
-from typing import Optional, Union, List
+from typing import List
+from collections import OrderedDict
 
 from src.config import BASE_DATA, BASE_DATA_DOWNSAMPLED, NUM_FEATURES, SEED, TARGET_COLS, NUM_COLS, CAT_COLS
 from src.paths import DATA_DIR, CLIENTS_DATA_DIR
@@ -60,7 +64,14 @@ def set_seed(seed: int = SEED, seed_torch: bool = True):
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
-    #print(f'Random seed {seed} has been set.')
+def set_device():
+    """_summary_
+
+    Returns:
+        _type_: _description_
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return device
 
 
 # ---------------------- DATASET CHECKS: ----------------------------------------------------------------------------
@@ -110,8 +121,10 @@ def row_check(clients: int = 5):
     y_test = pd.read_csv(CLIENTS_DATA_DIR/"y_test.csv")
 
     # Calculate totals
-    total_row_count = sum(len(df) for prefix in ["X_train", "X_val"] for df in datasets[prefix]) + len(X_test)
-    total_label_sum = sum(df["y"].sum() for prefix in ["y_train", "y_val"] for df in datasets[prefix]) + y_test["y"].sum()
+    total_row_count = sum(len(df) for prefix in [
+                          "X_train", "X_val"] for df in datasets[prefix]) + len(X_test)
+    total_label_sum = sum(df["y"].sum() for prefix in ["y_train", "y_val"]
+                          for df in datasets[prefix]) + y_test["y"].sum()
 
     # Validate dataset integrity
     assert total_row_count == expected_row_count, f"Total row count mismatch: expected {expected_row_count}, got {total_row_count}"
@@ -121,7 +134,6 @@ def row_check(clients: int = 5):
 
 
 # ----------------------------------- EDA PLOTING: -----------------------------------------------------------
-
 
 class EDAPlotter:
     def __init__(self) -> None:
@@ -212,7 +224,8 @@ class EDAPlotter:
     ):
         # Replace -1 with NaN in the specified columns
         temp_df = df.copy()
-        temp_df[cols_missing_neg1] = temp_df[cols_missing_neg1].replace(-1, np.nan)
+        temp_df[cols_missing_neg1] = temp_df[cols_missing_neg1].replace(
+            -1, np.nan)
 
         # Calculate the percentage of missing values by feature
         null_X = temp_df.isna().sum() / len(df) * 100
@@ -243,7 +256,7 @@ class EDAPlotter:
         plt.show()
 
 
-# ----------------------- Data Preprocessing Utils: --------------------------------
+# ----------------------- Data Preprocessing --------------------------------
 
 def preprocess_data(df):
     """
@@ -275,17 +288,18 @@ def preprocess_data(df):
 
     # Drop all rows with missing data
     df = df.dropna(axis=0)
-    
+
     X = df[CAT_COLS + NUM_COLS]
     y = df[TARGET_COLS]
 
     pipeline = encode_and_scale_data(df)
     X_scaled = pipeline.fit_transform(X)
-    encoded_cols = pipeline.named_steps['preprocess'].get_feature_names_out().tolist()
-    
+    encoded_cols = pipeline.named_steps['preprocess'].get_feature_names_out(
+    ).tolist()
+
     df_encoded = pd.DataFrame(X_scaled, columns=encoded_cols)
-    df_encoded[TARGET_COLS] = y 
-    
+    df_encoded[TARGET_COLS] = y
+
     return df_encoded, pipeline
 
 
@@ -310,25 +324,25 @@ def encode_and_scale_data(df):
     """
 
     # Encode categorical variables
-    
+
     num_preprocessing = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy="mean")),
         ("scaler", MinMaxScaler())
     ])
-    
+
     cat_preprocessing = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy='most_frequent')),
         ('encoder', OneHotEncoder(handle_unknown="ignore")),
     ])
-    
+
     data_preprocessing = ColumnTransformer(
         transformers=[
-        ('numerical', num_preprocessing, NUM_COLS),
-        ("categorical", cat_preprocessing, CAT_COLS)
-    ],
-    remainder="passthrough"
+            ('numerical', num_preprocessing, NUM_COLS),
+            ("categorical", cat_preprocessing, CAT_COLS)
+        ],
+        remainder="passthrough"
     )
-    
+
     pipeline = Pipeline(steps=[("preprocess", data_preprocessing)])
 
     return pipeline
@@ -379,64 +393,15 @@ def upload_dataset():
     """
     set_seed()
 
-    df = pd.read_csv(BASE_DATA_DOWNSAMPLED) #Using the downsampled base data
+    df = pd.read_csv(BASE_DATA_DOWNSAMPLED)  # Using the downsampled base data
     df_encoded, pipeline = preprocess_data(df)
-    
-    #print(f"The shape of the main dataframe {df_encoded.shape}") 
+
+    # print(f"The shape of the main dataframe {df_encoded.shape}")
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(df_encoded)
 
     feature_names = df_encoded.columns.tolist()[:-1]
 
     return (X_train, X_val, X_test, y_train, y_val, y_test, feature_names, pipeline)
-
-
-def load_individual_data(client_id, include_val_in_train=False):
-    """
-    Loads individual or global datasets as PyTorch TensorDatasets, with an option to include validation data in the training set.
-
-    This function dynamically loads training, validation, and test data from CSV files located in a specified directory.
-    It can load data for a specific client by ID or global data if the client ID is set to -1. There is an option to merge
-    training and validation datasets for scenarios where validation data should be included in training, e.g., for certain
-    types of model tuning.
-
-    Parameters:
-        client_id : int
-            The identifier for the agent's dataset to load. If set to -1, global datasets are loaded.
-        include_val_in_train : bool, optional
-            Determines whether validation data is included in the training dataset. Default is False.
-
-    Returns:
-        tuple
-            A tuple containing the training dataset, validation dataset, test dataset, column names of the training features,
-            a tensor of test features, and the total exposure calculated from the training (and optionally validation) dataset.
-
-    Examples:
-        >>> train_dataset, val_dataset, test_dataset, column_names, test_features, exposure = load_individual_data(-1, True)
-        >>> print(f"Training dataset size: {len(train_dataset)}")
-    """
-    
-    suffix = '' if client_id == -1 else f'_{client_id}'
-
-    # Load datasets
-    X_train = pd.read_csv(f'{CLIENTS_DATA_DIR}/X_train{suffix}.csv')
-    y_train = pd.read_csv(f'{CLIENTS_DATA_DIR}/y_train{suffix}.csv')
-    X_val = pd.read_csv(f'{CLIENTS_DATA_DIR}/X_val{suffix}.csv')
-    y_val = pd.read_csv(f'{CLIENTS_DATA_DIR}/y_val{suffix}.csv')
-    # Assuming test data is the same for all agents
-    X_test = pd.read_csv(f'{CLIENTS_DATA_DIR}/X_test.csv')
-    y_test = pd.read_csv(f'{CLIENTS_DATA_DIR}/y_test.csv')
-
-    # Merge training and validation datasets if specified
-    if include_val_in_train:
-        X_train = pd.concat([X_train, X_val], ignore_index=True)
-        y_train = pd.concat([y_train, y_val], ignore_index=True)
-
-    # Convert to TensorDatasets
-    train_dataset = TensorDataset(torch.tensor(X_train.values).float(), torch.tensor(y_train.values).float())
-    val_dataset = TensorDataset(torch.tensor(X_val.values).float(), torch.tensor(y_val.values).float())
-    test_dataset = TensorDataset(torch.tensor(X_test.values).float(), torch.tensor(y_test.values).float())
-
-    return (train_dataset, val_dataset, test_dataset, X_train.columns.tolist(), torch.tensor(X_test.values).float())
 
 
 def uniform_partitions(clients: int = 5, num_features: int = None):
@@ -501,7 +466,133 @@ def uniform_partitions(clients: int = 5, num_features: int = None):
         partition_train = np.array_split(train_data, clients)[i]
         partition_val = np.array_split(val_data, clients)[i]
 
-        save_to_csv(partition_train[:, :num_features], f'X_train_{i}.csv')
-        save_to_csv(partition_train[:, num_features:],f'y_train_{i}.csv', ['y'])
-        save_to_csv(partition_val[:, :num_features], f'X_val_{i}.csv')
-        save_to_csv(partition_val[:, num_features:], f'y_val_{i}.csv', ['y'])
+        save_to_csv(partition_train[:, :num_features].astype(
+            np.float32), f'X_train_{i}.csv')
+        save_to_csv(partition_train[:, num_features:].astype(
+            np.int64), f'y_train_{i}.csv', ['y'])
+        save_to_csv(partition_val[:, :num_features].astype(
+            np.float32), f'X_val_{i}.csv')
+        save_to_csv(partition_val[:, num_features:].astype(
+            np.int64), f'y_val_{i}.csv', ['y'])
+
+class FraudDataset(Dataset):
+    def __init__(self, x_file, y_file):
+
+        # Load the features and Label
+        self.x_data = pd.read_csv(x_file).values
+        # <-- remove singleton & convert to 1D
+        self.y_data = pd.read_csv(y_file).values.squeeze()
+
+        # Convert to tensors
+        self.x_data = torch.tensor(self.x_data, dtype=torch.float32)
+        self.y_data = torch.tensor(self.y_data, dtype=torch.long)
+
+    def __getitem__(self, idx):
+        x = self.x_data[idx]
+        y = self.y_data[idx]
+        return x, y
+
+    def __len__(self):
+        return len(self.x_data)
+
+
+# Function to load client datasets
+def load_client_data(client_id: int):
+    
+    x_train = CLIENTS_DATA_DIR / f"x_train_{client_id}.csv"
+    y_train = CLIENTS_DATA_DIR / f"y_train_{client_id}.csv"
+    x_val = CLIENTS_DATA_DIR / f"x_val_{client_id}.csv"
+    y_val = CLIENTS_DATA_DIR / f"y_val_{client_id}.csv"
+    
+    train_dataset = FraudDataset(x_train, y_train)
+    val_dataset = FraudDataset(x_val, y_val)
+    return train_dataset, val_dataset
+
+
+def load_test_data():
+    test_dataset = FraudDataset(CLIENTS_DATA_DIR/"X_test.csv", CLIENTS_DATA_DIR/"y_test.csv")
+    return test_dataset
+
+
+# ----------------------------- NEURAL-NET (MLP ARCHITECTURE) ----------------------------------
+
+class FraudDetectionModel(nn.Module):
+    def __init__(self, num_features, num_classes):
+        super().__init__()
+
+        self.all_layers = nn.Sequential(
+
+            # 1st hidden layer
+            nn.Linear(num_features, 25),
+            nn.ReLU(),
+
+            # 2nd hidden layer
+            nn.Linear(25, 15),
+            nn.ReLU(),
+
+            # output layer
+            nn.Linear(15, num_classes)
+        )
+
+    def forward(self, x):
+        logits = self.all_layers(x)
+        return logits
+
+
+# ---------------------------------- FL HELPER FUNCTIONS ---------------------------------------
+
+def get_weights(model) -> List[np.ndarray]:
+    """
+    Retrieves model parameters (weights & bias) from local model (client side).
+    This function extracts the model's parameters as numpy arrays.
+
+    Returns:
+        List[np.ndarray]
+            A list of numpy arrays representing the model's parameters. 
+            Each numpy array in the list corresponds to parameters of a different layer or component of 
+            the model.
+
+    Examples:
+        >>> model = YourModelClass()
+        >>> parameters = get_parameters(model)
+        >>> type(parameters)
+        <class 'list'>
+        >>> type(parameters[0])
+        <class 'numpy.ndarray'>
+    """
+    weights = [val.cpu().numpy() for _, val in model.state_dict().items()]
+    return weights
+
+def set_weights(model, parameters):
+    """
+    Updates the model's parameters with new values provided as a list of NumPy ndarrays.
+
+    This function takes a list of NumPy arrays containing new parameter values and updates the local model's
+    parameters accordingly. It's typically used to set model parameters after they have been modified
+    or updated elsewhere, possibly after aggregation in a federated learning scenario or after receiving
+    updates from an optimization process.
+
+    Parameters:
+        parameters : List[np.ndarray]
+            A list of NumPy ndarrays where each array corresponds to the parameters for a different layer or
+            component of the model. The order of the arrays in the list should match the order of parameters
+            in the model's state_dict.
+
+    Returns:
+        None
+
+    Examples:
+        >>> model = YourModelClass()
+        >>> new_parameters = [np.array([[0.1, 0.2], [0.3, 0.4]]), np.array([0.5, 0.6])]
+        >>> set_parameters(model, new_parameters)
+        >>> # Model parameters are now updated with `new_parameters`.
+
+    Notes:
+        - This method assumes that the provided list of parameters matches the structure and order of the model's parameters. If the order or structure of `parameters` does not match, this may lead to incorrect assignment of parameters or runtime errors.
+        - The method converts each NumPy ndarray to a PyTorch tensor before updating the model's state dict. Ensure that the data types and device (CPU/GPU) of the NumPy arrays are compatible with your model's requirements.
+    """
+    params_dict = zip(model.state_dict().keys(), parameters)
+    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+    model.load_state_dict(state_dict, strict=True)
+
+

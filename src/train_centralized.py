@@ -2,8 +2,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import optuna
-
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.metrics import precision_score, accuracy_score, roc_auc_score, roc_curve
 from sklearn.metrics import f1_score, confusion_matrix, classification_report, recall_score
