@@ -1,4 +1,5 @@
 import random
+import time
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,7 +17,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-from typing import List
+from typing import List, Callable
 from collections import OrderedDict
 
 from src.config import BASE_DATA, BASE_DATA_DOWNSAMPLED, NUM_FEATURES, SEED, TARGET_COLS, NUM_COLS, CAT_COLS
@@ -64,14 +65,54 @@ def set_seed(seed: int = SEED, seed_torch: bool = True):
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
-def set_device():
-    """_summary_
+
+# ----------------------------------- OTHER USEFUL STUFF ------------------------------
+
+def set_device() -> str:
+    """
+    Determine the available computing device (GPU or CPU).
+
+    This function checks if a CUDA-compatible GPU is available. If so, 
+    it returns "cuda", otherwise, it defaults to "cpu".
 
     Returns:
-        _type_: _description_
+        str: The name of the computing device, either "cuda" (GPU) or "cpu".
+
+    Example:
+        >>> set_device()
+        'cuda'  # If GPU is available
+        'cpu'   # If GPU is not available
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return device
+
+
+def timer(func: Callable)-> Callable:
+    """
+    A decorator that measures and prints the execution time of a function.
+
+    Args: 
+        func (Callable): The function being decorated.
+
+    Returns:
+        Callable: The decorated function that prints execution time.
+
+    Example:
+        >>> @timer
+        >>> def slow_function():
+        >>>     time.sleep(2)
+        >>> slow_function()
+        slow_function took 2.00 secs to execute
+    """
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        stop_time = time.time()
+        print(
+            f"\n{func.__name__} took {stop_time - start_time:.2f} secs to execute\n")
+        return result
+
+    return wrapper
 
 
 # ---------------------- DATASET CHECKS: ----------------------------------------------------------------------------
@@ -369,7 +410,7 @@ def split_data(df_encoded):
     y = df_encoded.iloc[:, -1].to_numpy()
 
     X_trainval, X_test, y_trainval, y_test = train_test_split(
-        X, y, test_size=0.1, stratify=y, random_state=SEED)
+        X, y, test_size=0.1, random_state=SEED)
     X_train, X_val, y_train, y_val = train_test_split(
         X_trainval, y_trainval, test_size=0.1, random_state=SEED)
 
@@ -414,7 +455,7 @@ def uniform_partitions(clients: int = 5, num_features: int = None):
 
     Parameters:
         agents : int, optional
-            The number of agents to split the dataset into. Defaults to 10.
+            The number of agents to split the dataset into. Defaults to 5.
         num_features : int, optional
             The number of features in the dataset. Automatically inferred if not specified.
 
@@ -475,8 +516,36 @@ def uniform_partitions(clients: int = 5, num_features: int = None):
         save_to_csv(partition_val[:, num_features:].astype(
             np.int64), f'y_val_{i}.csv', ['y'])
 
+
 class FraudDataset(Dataset):
-    def __init__(self, x_file, y_file):
+    """
+    A custom PyTorch Dataset for loading fraud detection data.
+
+    This dataset loads feature vectors and corresponding labels from CSV files,
+    converts them into PyTorch tensors, and provides standard Dataset methods
+    for indexing and length retrieval.
+
+    Args:
+        x_file (str): Path to the CSV file containing feature data.
+        y_file (str): Path to the CSV file containing labels.
+
+    Attributes:
+        x_data (torch.Tensor): Feature data stored as a PyTorch tensor.
+        y_data (torch.Tensor): Labels stored as a PyTorch tensor.
+
+    Methods:
+        __getitem__(idx): Returns the feature-label pair at the given index.
+        __len__(): Returns the number of samples in the dataset.
+
+    Example:
+        >>> dataset = FraudDataset("features.csv", "labels.csv")
+        >>> len(dataset)  # Number of samples
+        1000
+        >>> x, y = dataset[0]  # Get first sample
+        >>> x.shape, y
+        (torch.Size([num_features]), tensor(label))
+    """
+    def __init__(self, x_file: str, y_file: str):
 
         # Load the features and Label
         self.x_data = pd.read_csv(x_file).values
@@ -498,25 +567,82 @@ class FraudDataset(Dataset):
 
 # Function to load client datasets
 def load_client_data(client_id: int):
-    
+    """
+    Loads training and validation datasets for a specific client.
+
+    This function retrieves the training and validation data for a given client,
+    constructs `FraudDataset` instances, and returns them.
+
+    Args:
+        client_id (int): The unique identifier for the client.
+
+    Returns:
+        Tuple[FraudDataset, FraudDataset]: The training and validation datasets for the specified client.
+
+    Example:
+        >>> train_data, val_data = load_client_data(1)
+        >>> len(train_data), len(val_data)
+        (800, 200)
+    """
+
     x_train = CLIENTS_DATA_DIR / f"x_train_{client_id}.csv"
     y_train = CLIENTS_DATA_DIR / f"y_train_{client_id}.csv"
     x_val = CLIENTS_DATA_DIR / f"x_val_{client_id}.csv"
     y_val = CLIENTS_DATA_DIR / f"y_val_{client_id}.csv"
-    
+
     train_dataset = FraudDataset(x_train, y_train)
     val_dataset = FraudDataset(x_val, y_val)
     return train_dataset, val_dataset
 
 
 def load_test_data():
-    test_dataset = FraudDataset(CLIENTS_DATA_DIR/"X_test.csv", CLIENTS_DATA_DIR/"y_test.csv")
+    """
+    Loads the global test dataset for evaluating the final model.
+
+    This function retrieves the test data, constructs a `FraudDataset` instance,
+    and returns it.
+
+    Returns:
+        FraudDataset: The test dataset.
+
+    Example:
+        >>> test_data = load_test_data()
+        >>> len(test_data)
+        1000
+    """
+    test_dataset = FraudDataset(
+        CLIENTS_DATA_DIR/"X_test.csv", CLIENTS_DATA_DIR/"y_test.csv")
     return test_dataset
 
 
 # ----------------------------- NEURAL-NET (MLP ARCHITECTURE) ----------------------------------
 
 class FraudDetectionModel(nn.Module):
+    """
+    A simple Multi Layer Perceptron (feedforward neural network) for fraud detection.
+
+    This model consists of:
+    - An input layer that takes `num_features` features.
+    - Two hidden layers with ReLU activations.
+    - An output layer with `num_classes` units.
+
+    Args:
+        num_features (int): The number of input features.
+        num_classes (int): The number of output classes.
+
+    Attributes:
+        all_layers (torch.nn.Sequential): The sequential layers defining the model.
+
+    Methods:
+        forward(x): Performs a forward pass through the model.
+
+    Example:
+        >>> model = FraudDetectionModel(num_features=30, num_classes=2)
+        >>> x = torch.randn(1, 30)  # Sample input tensor
+        >>> output = model(x)
+        >>> output.shape
+        torch.Size([1, 2])  # Output matches the number of classes
+    """
     def __init__(self, num_features, num_classes):
         super().__init__()
 
@@ -534,7 +660,16 @@ class FraudDetectionModel(nn.Module):
             nn.Linear(15, num_classes)
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Performs a forward pass through the model.
+
+        Args:
+            x (torch.Tensor): The input tensor of shape (batch_size, num_features).
+
+        Returns:
+            torch.Tensor: The output logits of shape (batch_size, num_classes).
+        """
         logits = self.all_layers(x)
         return logits
 
@@ -562,6 +697,7 @@ def get_weights(model) -> List[np.ndarray]:
     """
     weights = [val.cpu().numpy() for _, val in model.state_dict().items()]
     return weights
+
 
 def set_weights(model, parameters):
     """
@@ -594,5 +730,3 @@ def set_weights(model, parameters):
     params_dict = zip(model.state_dict().keys(), parameters)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     model.load_state_dict(state_dict, strict=True)
-
-

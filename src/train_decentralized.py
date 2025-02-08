@@ -6,41 +6,84 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from src import config
+from src.local_utility import timer, set_device, set_seed
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score, roc_curve
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
 
-def train_model(model, train_set):
+DEVICE = set_device()
 
+def train_model(model, train_set):
+    """
+    Trains a given model on the provided training dataset using mini-batch gradient descent.
+
+    Args:
+        model (torch.nn.Module): The neural network model to be trained.
+        train_set (torch.utils.data.Dataset): The dataset used for training.
+
+    Returns:
+        torch.nn.Module: The trained model after all epochs.
+    
+    Notes:
+        - Uses CrossEntropyLoss as the loss function.
+        - Uses Adam optimizer with a learning rate from `config.LEARNING_RATE`.
+        - Moves both model and data to the specified device (CPU/GPU).
+        - Performs multiple epochs of training with gradient descent updates.
+    """
+    set_seed(seed_torch=True)
+    
     train_loader = DataLoader(train_set, batch_size=config.BATCH_SIZE, shuffle=True) 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr = config.LEARNING_RATE)
     
+    model = model.to(DEVICE)
     model = model.train()
     
     for epoch in range(config.EPOCHS):
         for features, labels in train_loader:
+            features, labels = features.to(DEVICE), labels.to(DEVICE)
             logits = model(features)
             optimizer.zero_grad()
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
             
+            
 def evaluate_model(model, val_set):
+    """
+    Evaluates the given model on the validation dataset.
+
+    Args:
+        model (torch.nn.Module): The trained neural network model to be evaluated.
+        val_set (torch.utils.data.Dataset): The validation dataset.
+
+    Returns:
+        Tuple[float, float]: A tuple containing:
+            - avg_loss (float): The average loss over the validation dataset.
+            - accuracy (float): The accuracy of the model on the validation dataset.
+
+    Notes:
+        - Uses CrossEntropyLoss as the evaluation loss function.
+        - Moves both the model and data to the specified device (CPU/GPU).
+        - Disables gradient calculations to improve efficiency.
+    """
     correct, total_example, total_loss = 0, 0, 0
     val_loader = DataLoader(val_set, batch_size=config.BATCH_SIZE, shuffle=False)
     criterion = nn.CrossEntropyLoss()
     
+    model = model.to(DEVICE)
     model = model.eval()
     
-    for features, labels in val_loader:
-        with torch.no_grad():
+    
+    with torch.no_grad():
+        for features, labels in val_loader:
+            features, labels = features.to(DEVICE), labels.to(DEVICE)
             logits = model(features)
         
-        predictions = torch.argmax(logits, dim=1)
-        correct += torch.sum(predictions == labels).item()
-        total_example += len(labels)
-        total_loss += criterion(logits, labels).item()
+            predictions = torch.argmax(logits, dim=1)
+            correct += torch.sum(predictions == labels).item()
+            total_example += len(labels)
+            total_loss += criterion(logits, labels).item()
     
     accuracy = correct / total_example
     avg_loss = total_loss / len(val_loader)
@@ -50,15 +93,40 @@ def evaluate_model(model, val_set):
 final_model = []
 
 def final_test_evaluation(model, test_set):
-    """_summary_
+    """
+    Evaluate a trained model on a given test dataset and compute performance metrics.
+
+    This function evaluates a given model on a provided test dataset, computes key classification
+    metrics, and visualizes the results using a confusion matrix and an ROC curve. It also stores
+    the evaluation results for further analysis.
 
     Args:
-        model (_type_): _description_
-        test_set (_type_): _description_
+        model (torch.nn.Module): The trained model to be evaluated.
+        test_set (torch.utils.data.Dataset): The dataset to evaluate the model on.
 
     Returns:
-        _type_: _description_
+        list: A list containing a dictionary with evaluation metrics:
+            - 'Model': Name of the model evaluated (MLP).
+            - 'Accuracy': Classification accuracy.
+            - 'Precision': Precision score.
+            - 'Recall': Recall score.
+            - 'F1-Score': F1-score.
+            - 'ROC-AUC': Receiver Operating Characteristic Area Under Curve (ROC-AUC).
+            - '3-Fold CV ROC-AUC': Placeholder for cross-validation score (NIL).
+
+    Notes:
+        - The function moves the model to evaluation mode.
+        - Computes metrics such as accuracy, precision, recall, F1-score, and ROC-AUC.
+        - Plots the confusion matrix and ROC curve.
+        - Uses softmax to extract probabilities for the positive class.
+        - Uses sklearn's classification_report to print a summary of classification performance.
+
+    Example:
+        >>> model = MyTrainedModel()
+        >>> test_set = MyTestDataset()
+        >>> results = final_test_evaluation(model, test_set)
     """
+    model = model.to(DEVICE)
     model = model.eval()
     test_loader = DataLoader(test_set, batch_size=config.BATCH_SIZE, shuffle=False)
     
@@ -70,6 +138,7 @@ def final_test_evaluation(model, test_set):
     
     with torch.no_grad():
         for features, labels in test_loader:
+            features, labels = features.to(DEVICE), labels.to(DEVICE)
             logits = model(features)
             probs = torch.softmax(logits, dim=1)[:, 1] # Get probability of class 1
             predictions = torch.argmax(logits, dim=1)

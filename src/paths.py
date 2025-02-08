@@ -8,7 +8,7 @@ CLIENTS_DATA_DIR = DATA_DIR / "clients_data"
 
 
 if not Path(DATA_DIR).exists():
-    os.mkdir(DATA_DIR)
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 if not Path(CLIENTS_DATA_DIR).exists():
-    os.mkdir(CLIENTS_DATA_DIR)
+    os.makedirs(CLIENTS_DATA_DIR, exist_ok=True)

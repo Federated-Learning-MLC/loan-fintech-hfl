@@ -25,7 +25,7 @@ NUM_CLASSES = 2
 # Server Configuration
 SERVER_CONFIG = {
     "num_clients": 5,
-    "num_rounds": 50 #10
+    "num_rounds": 20
 }
 
 # Dataset Configuration

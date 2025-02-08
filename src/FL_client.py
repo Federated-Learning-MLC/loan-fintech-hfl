@@ -18,9 +18,10 @@ from logging import ERROR
 from src.config import EPOCHS, BATCH_SIZE, LEARNING_RATE, NUM_FEATURES
 from src.paths import CLIENTS_DATA_DIR
 from src.train_decentralized import train_model, evaluate_model
-from src.local_utility import set_weights, get_weights, FraudDetectionModel
+from src.local_utility import set_weights, get_weights, set_device
 
 
+DEVICE = set_device()
 
 #---------------------------------- FLOWER CLIENT --------------------------------------------
 
@@ -36,7 +37,8 @@ class BankFLClient(NumPyClient):
         - valset (torch.utils.data.Dataset): The validation dataset.
     """
     def __init__(self, model, trainset, valset):
-        self.model = model
+        self.device = DEVICE
+        self.model = model.to(self.device)
         self.trainset = trainset 
         self.valset = valset
         
