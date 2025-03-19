@@ -15,4 +15,6 @@ data/Base.csv
 
 #ipynb checkpoints and notebook
 notebooks/*.ipynb_checkpoints
+notebooks/decent.ipynb
+notebooks/Test - Demo.ipynb
 notebooks/Test.ipynb
