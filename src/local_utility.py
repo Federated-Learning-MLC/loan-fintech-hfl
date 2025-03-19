@@ -1,3 +1,6 @@
+from src.paths import DATA_DIR, CLIENTS_DATA_DIR
+from src.config import BASE_DATA, BASE_DATA_DOWNSAMPLED, NUM_FEATURES, SEED, TARGET_COLS, NUM_COLS, CAT_COLS, DROPOUT
+from src.config import BASE_DATA, BASE_DATA_DOWNSAMPLED, NUM_FEATURES, SEED, TARGET_COLS, NUM_COLS, CAT_COLS
 import random
 import time
 import pandas as pd
@@ -19,9 +22,6 @@ from torch.utils.data import Dataset, DataLoader
 
 from typing import List, Callable
 from collections import OrderedDict
-
-from src.config import BASE_DATA, BASE_DATA_DOWNSAMPLED, NUM_FEATURES, SEED, TARGET_COLS, NUM_COLS, CAT_COLS
-from src.paths import DATA_DIR, CLIENTS_DATA_DIR
 
 
 # ---------------------- CONTROL FOR RANDOMNESS: ----------------------------------------------------------------
@@ -87,7 +87,7 @@ def set_device() -> str:
     return device
 
 
-def timer(func: Callable)-> Callable:
+def timer(func: Callable) -> Callable:
     """
     A decorator that measures and prints the execution time of a function.
 
@@ -545,6 +545,7 @@ class FraudDataset(Dataset):
         >>> x.shape, y
         (torch.Size([num_features]), tensor(label))
     """
+
     def __init__(self, x_file: str, y_file: str):
 
         # Load the features and Label
@@ -643,6 +644,7 @@ class FraudDetectionModel(nn.Module):
         >>> output.shape
         torch.Size([1, 2])  # Output matches the number of classes
     """
+
     def __init__(self, num_features, num_classes):
         super().__init__()
 
@@ -671,6 +673,32 @@ class FraudDetectionModel(nn.Module):
             torch.Tensor: The output logits of shape (batch_size, num_classes).
         """
         logits = self.all_layers(x)
+        return logits
+
+
+# ----------------------------- NEURAL-NET (Transformer ARCHITECTURE) ----------------------------------
+
+class TransformerModel(nn.Module):
+    def __init__(self, input_dim, num_classes, num_heads, num_layers, dim_feedforward, dropout=DROPOUT):
+        super().__init__()
+        self.embedding = nn.Linear(input_dim, dim_feedforward)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=dim_feedforward,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(dim_feedforward, num_classes)
+
+    def forward(self, x):
+        x = self.embedding(x)
+        x = x.unsqueeze(1)  # Add sequence dimension
+        x = self.transformer_encoder(x)
+        x = x.squeeze(1)  # Remove sequence dimension
+        logits = self.fc(x)
         return logits
 
 

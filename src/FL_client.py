@@ -1,12 +1,12 @@
-import os 
-import pandas as pd 
+import os
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
 from collections import OrderedDict
 from typing import Tuple, List, Dict, Optional
 
-import torch 
+import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
@@ -23,7 +23,8 @@ from src.local_utility import set_weights, get_weights, set_device
 
 DEVICE = set_device()
 
-#---------------------------------- FLOWER CLIENT --------------------------------------------
+# ---------------------------------- FLOWER CLIENT --------------------------------------------
+
 
 class BankFLClient(NumPyClient):
     """
@@ -36,12 +37,15 @@ class BankFLClient(NumPyClient):
         - trainset (torch.utils.data.Dataset): The training dataset.
         - valset (torch.utils.data.Dataset): The validation dataset.
     """
-    def __init__(self, model, trainset, valset):
+
+    def __init__(self, model, trainset, valset, optim=None):
         self.device = DEVICE
         self.model = model.to(self.device)
-        self.trainset = trainset 
+        self.trainset = trainset
         self.valset = valset
-        
+
+        self.optimizer = optim
+
     # Train model
     def fit(self, parameters, config):
         """
@@ -53,10 +57,13 @@ class BankFLClient(NumPyClient):
         executing the training loop.
         """
         set_weights(self.model, parameters)
-        train_model(self.model, self.trainset)
+
+        train_model(self.model, self.trainset, self.optimizer)
+
         return get_weights(self.model), len(self.trainset), {}
-    
+
     # Test the model
+
     def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]):
         """
         Evaluates the model with the provided global parameters on local test data.
@@ -73,4 +80,3 @@ class BankFLClient(NumPyClient):
         set_weights(self.model, parameters)
         loss, accuracy = evaluate_model(self.model, self.valset)
         return loss, len(self.valset), {"accuracy": accuracy}
-        
