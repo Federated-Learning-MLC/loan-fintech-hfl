@@ -1,3 +1,4 @@
+import numpy as np 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -104,6 +105,20 @@ def evaluate_model(model, val_set):
     return avg_loss, accuracy
 
 
+
+def recall_at_fpr_threshold(y_true, y_proba_scores, fpr_target=0.01):
+    # Get FPR, TPR, and thresholds
+    fpr, tpr, thresholds = roc_curve(y_true, y_proba_scores)
+
+    # Find threshold where FPR <= target FPR
+    idx = np.where(fpr <= fpr_target)[0]
+    if len(idx) == 0:
+        return 0.0  # no such threshold found
+    max_recall = tpr[idx[-1]]  # highest recall at FPR ≤ threshold
+    return max_recall
+
+
+
 def final_test_evaluation(model, test_set):
     """
     Evaluate a trained model on a given test dataset and compute performance metrics.
@@ -138,6 +153,8 @@ def final_test_evaluation(model, test_set):
         >>> test_set = MyTestDataset()
         >>> results = final_test_evaluation(model, test_set)
     """
+    set_seed(seed_torch=True)
+    
     model = model.to(DEVICE)
     model = model.eval()
 
@@ -167,14 +184,17 @@ def final_test_evaluation(model, test_set):
     accu = accuracy_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds)
+    
     recall = recall_score(all_labels, all_preds)
+    recall_1_fpr = recall_at_fpr_threshold(all_labels, all_probs, fpr_target=0.01)
+    recall_5_fpr = recall_at_fpr_threshold(all_labels, all_probs, fpr_target=0.05)
+    
     roc_auc = roc_auc_score(all_labels, all_probs)
     cm = confusion_matrix(all_labels, all_preds, normalize="true")
 
     # Print Metrics
     print("")
-    print(
-        f"Accuracy: {accu:.2f} | Recall: {recall:.2f} | Precision: {precision:.2f} | ROC-AUC: {roc_auc:.2f}")
+    print(f"Accuracy: {accu:.2f} | Recall: {recall:.2f} | Precision: {precision:.2f} | ROC-AUC: {roc_auc:.2f} | Recall 1%-FPR: {recall_1_fpr:.2f} | Recall 5%-FPR: {recall_5_fpr:.2f}")
 
     print("\n", "_________"*11, "\n")
 
